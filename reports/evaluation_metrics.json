@@ -1,0 +1,57 @@
+{
+  "train_total_claims": 283,
+  "train_readable_receipts": 277,
+  "train_unreadable_or_missing": 6,
+  "train_decisions": {
+    "approve": 245,
+    "review": 38
+  },
+  "test_total_claims": 190,
+  "test_decisions": {
+    "approve": 160,
+    "review": 30
+  },
+  "field_accuracy_vs_audited_receipt_ground_truth_pct": {
+    "vendor": 100.0,
+    "receipt_date": 100.0,
+    "receipt_number": 100.0,
+    "gstin": 100.0,
+    "total_amount": 100.0
+  },
+  "field_agreement_vs_raw_uncleaned_clerk_typing_pct": {
+    "vendor": 79.78,
+    "receipt_date": 97.11,
+    "receipt_number": 94.58,
+    "gstin": 92.78,
+    "total_amount": 98.19
+  },
+  "clerk_typing_errors_found_in_train": {
+    "vendor_spelling_or_word_order_variants": 56,
+    "receipt_date_1day_or_ddmm_swap_typos": 8,
+    "receipt_number_dropped_digit_typos": 15,
+    "gstin_omitted_or_1char_typos": 20,
+    "amount_1digit_typos": 5
+  },
+  "fraud_and_policy_anomalies_caught": {
+    "train": {
+      "missing_or_unreadable_or_cropped_photos": 6,
+      "altered_overwritten_bills": 8,
+      "prompt_injection_stamps": 3,
+      "duplicate_bills_second_submission": 17,
+      "claimed_amount_mismatches_over_rs10": 7,
+      "colleague_vehicle_mismatches": 3,
+      "total_unique_claims_flagged_for_review": 38,
+      "undetected_fraud_and_overpayments_approved_by_clerks_rs": 19353.2
+    },
+    "test": {
+      "missing_or_unreadable_or_cropped_photos": 5,
+      "altered_overwritten_bills": 6,
+      "prompt_injection_stamps": 2,
+      "duplicate_bills_resubmitted": 13,
+      "claimed_amount_mismatches_over_rs10": 6,
+      "colleague_vehicle_or_passenger_mismatches": 2,
+      "total_unique_claims_flagged_for_review": 30,
+      "fraud_and_overpayments_prevented_before_payout_rs": 16245.8
+    }
+  }
+}
