@@ -112,12 +112,48 @@ def get_all_candidate_lines(entry: Dict[str, Any]) -> List[str]:
 
 def identify_vendor_and_gstin(lines: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     full_up = re.sub(r'\s+', '', "\n".join(lines).upper())
+    # 1. Known 31-vendor catalog exact/fuzzy pattern match
     for v_name, cat, gstin, city, pri_pats, sec_pats in VENDOR_CATALOG:
         if any(p.replace(' ', '') in full_up for p in pri_pats):
             return v_name, cat, gstin, city
     for v_name, cat, gstin, city, pri_pats, sec_pats in VENDOR_CATALOG:
         if any(p.replace(' ', '') in full_up for p in sec_pats):
             return v_name, cat, gstin, city
+
+    # 2. Generic unseen vendor fallback
+    extracted_gstin = ""
+    gstin_match = re.search(r'\b(\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1})\b', "\n".join(lines).upper())
+    if gstin_match:
+        extracted_gstin = gstin_match.group(1)
+
+    # Infer expense category from receipt lexical signals
+    cat = "Food"
+    if any(k in full_up for k in ['PETROL', 'DIESEL', 'FUEL', 'DISPENSER', 'NOZZLE', 'LITRE', 'DENSITY']):
+        cat = "Fuel"
+    elif any(k in full_up for k in ['HOTEL', 'LODGE', 'RESIDENCY', 'INN', 'COMFORTS', 'CHECKIN', 'CHECKOUT', 'ROOM']):
+        cat = "Lodging"
+    elif any(k in full_up for k in ['COURIER', 'PARCEL', 'CARGO', 'AWB', 'SPEEDPOST', 'TRACKING']):
+        cat = "Courier"
+    elif any(k in full_up for k in ['TAXI', 'CAB', 'TOURS', 'TRAVELS', 'AUTO', 'FARE']):
+        cat = "Local travel"
+    elif any(k in full_up for k in ['PARKING', 'PAY&PARK', 'VEHICLEPARK']):
+        cat = "Parking"
+    elif any(k in full_up for k in ['RESTAURANT', 'DHABA', 'CAFE', 'FOOD', 'DINING', 'SNACKS', 'BHOJNALAYA', 'MEALS']):
+        cat = "Food"
+
+    # Extract vendor candidate from top header lines, skipping standard receipt headers
+    boilerplate = {'TAX INVOICE', 'INVOICE', 'CASH MEMO', 'BILL OF SUPPLY', 'RETAIL INVOICE', 'RECEIPT', 'ORIGINAL', 'WELCOME', 'GSTIN', 'GST', 'DATE', 'BILL NO'}
+    vendor_cand = None
+    for line in lines[:6]:
+        cleaned = re.sub(r'[^A-Za-z0-9\s&]', ' ', line).strip()
+        cleaned_up = cleaned.upper()
+        if len(cleaned) >= 4 and not any(b in cleaned_up for b in boilerplate) and not re.match(r'^\d+$', cleaned):
+            vendor_cand = cleaned
+            break
+
+    if vendor_cand:
+        return vendor_cand, cat, extracted_gstin, "Maharashtra"
+
     return None, None, None, None
 
 def clean_digit_str(s: str) -> str:
@@ -149,21 +185,25 @@ def extract_receipt_number(v_name: Optional[str], cat: Optional[str], lines: Lis
     full = "\n".join(lines)
     full_nospace = re.sub(r'\s+', '', full)
     if cat == "Courier":
-        prefix = {"SpeedLink Couriers": "SL", "Vidarbha Express Courier": "VX", "Prompt Parcel Services": "PP"}[v_name]
-        m = re.search(prefix + r'([0-9oOilLsSe]{8})', full_nospace, re.I)
-        if m: return prefix + clean_digit_str(m.group(1))
-        m2 = re.search(r'(?:AWB|No)[:\uff1a\s]*[A-Z0-9]{0,2}([0-9oOilLsSe]{8})', full_nospace, re.I)
-        if m2: return prefix + clean_digit_str(m2.group(1))
+        c_prefixes = {"SpeedLink Couriers": "SL", "Vidarbha Express Courier": "VX", "Prompt Parcel Services": "PP"}
+        prefix = c_prefixes.get(v_name, "")
+        if prefix:
+            m = re.search(prefix + r'([0-9oOilLsSe]{8})', full_nospace, re.I)
+            if m: return prefix + clean_digit_str(m.group(1))
+            m2 = re.search(r'(?:AWB|No)[:\uff1a\s]*[A-Z0-9]{0,2}([0-9oOilLsSe]{8})', full_nospace, re.I)
+            if m2: return prefix + clean_digit_str(m2.group(1))
     elif cat == "Lodging":
-        prefix = {
+        l_prefixes = {
             "Hotel Centre Point Inn": "HCP",
             "Hotel Gulmohar Executive": "HGE",
             "Hotel Krishna Comforts": "HKC",
             "Hotel Shubham Residency": "HSR",
             "Sai Palace Lodge": "SPL"
-        }[v_name]
-        m = re.search(r'26-27[/\\1I]([0-9oOilLsSe]{4})', full_nospace)
-        if m: return f"{prefix}/26-27/{clean_digit_str(m.group(1))}"
+        }
+        prefix = l_prefixes.get(v_name, "")
+        if prefix:
+            m = re.search(r'26-27[/\\1I]([0-9oOilLsSe]{4})', full_nospace)
+            if m: return f"{prefix}/26-27/{clean_digit_str(m.group(1))}"
     elif cat == "Fuel":
         for line in lines:
             if any(w in line.upper() for w in ['RECEIPT', 'NO:', 'NO :', 'NO\uff1a']) and 'VEHICLE' not in line.upper() and 'NOZZLE' not in line.upper():
@@ -229,6 +269,13 @@ def extract_receipt_number(v_name: Optional[str], cat: Optional[str], lines: Lis
                 d = clean_digit_str(s)
                 if d[0] in expected_first and d not in ['2026', '2826', '2626']:
                     return d
+    # Generic receipt number fallback across all categories for unseen vendors
+    for line in lines:
+        m = re.search(r'\b(?:INVOICE\s*(?:NO|NUMBER)?|CASH\s*MEMO|RECEIPT\s*(?:NO)?|BILL\s*(?:NO)?|MEMO|INV|AWB|NO\.?)\s*[:#.-]*\s*([A-Z0-9/-]{3,20})', line, re.I)
+        if m:
+            cand = m.group(1).strip()
+            if cand.upper() not in ['2026', 'DATE', 'TIME', 'TOTAL', 'NAME', 'GUEST', 'ROOM']:
+                return cand
     return None
 
 def fix_day_month(d_str: str, m_str: str) -> Tuple[int, int]:
@@ -518,4 +565,11 @@ def extract_total_amount(v_name: Optional[str], cat: Optional[str], lines: List[
                 if int_decs:
                     return max(int_decs)
                 return max(decs)
+        # Generic total amount fallback for unseen vendors
+        for line in lines:
+            m = re.search(r'(?:TOTAL|GRAND\s*TOTAL|NET|PAID|AMOUNT|RS\.?|INR)[:\s₹]*(\d+(?:\.\d{2})?)', line, re.I)
+            if m:
+                val = float(m.group(1))
+                if 20 <= val <= 25000 and val != 2026:
+                    return val
     return None
